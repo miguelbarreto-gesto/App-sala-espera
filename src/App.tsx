@@ -1,229 +1,274 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Patient, Seat } from './types';
-import { fetchWorklistPatients, fetchPatientStatuses, applyStatusUpdates, updatePatientStatus } from './services/api';
-import { WaitingRoom } from './components/WaitingRoom';
-import { PatientList } from './components/PatientList';
-import { FloorPlanEditor } from './components/FloorPlanEditor';
+import { fetchWorklistPatients, updatePatientStatus } from './services/api';
+import { getWaitingLevel, getWaitingMinutes, getWaitingColor, getWaitingBgColor, getWaitingBorderColor } from './utils/waitingTime';
 import './App.css';
 
 const DEFAULT_SEATS: Seat[] = [
-  { id: 'A1', label: 'A1', row: 0, col: 0, patientId: null },
-  { id: 'A2', label: 'A2', row: 0, col: 1, patientId: null },
-  { id: 'A3', label: 'A3', row: 0, col: 2, patientId: null },
-  { id: 'A4', label: 'A4', row: 0, col: 3, patientId: null },
-  { id: 'B1', label: 'B1', row: 1, col: 0, patientId: null },
-  { id: 'B2', label: 'B2', row: 1, col: 1, patientId: null },
-  { id: 'B3', label: 'B3', row: 1, col: 2, patientId: null },
-  { id: 'B4', label: 'B4', row: 1, col: 3, patientId: null },
-  { id: 'C1', label: 'C1', row: 2, col: 0, patientId: null },
-  { id: 'C2', label: 'C2', row: 2, col: 1, patientId: null },
-  { id: 'C3', label: 'C3', row: 2, col: 2, patientId: null },
-  { id: 'C4', label: 'C4', row: 2, col: 3, patientId: null },
+  { id: 'A1', label: '1', row: 0, col: 0, patientId: null },
+  { id: 'A2', label: '2', row: 0, col: 1, patientId: null },
+  { id: 'A3', label: '3', row: 0, col: 2, patientId: null },
+  { id: 'B1', label: '4', row: 1, col: 0, patientId: null },
+  { id: 'B2', label: '5', row: 1, col: 1, patientId: null },
+  { id: 'B3', label: '6', row: 1, col: 2, patientId: null },
+  { id: 'C1', label: '7', row: 2, col: 0, patientId: null },
+  { id: 'C2', label: '8', row: 2, col: 1, patientId: null },
+  { id: 'C3', label: '9', row: 2, col: 2, patientId: null },
 ];
 
-const STATUS_POLL_INTERVAL = 30000;
-
-function loadSavedState() {
-  try {
-    const saved = localStorage.getItem('waitingRoom');
-    if (saved) {
-      const data = JSON.parse(saved);
-      return {
-        seats: data.seats || DEFAULT_SEATS,
-        floorPlanUrl: data.floorPlanUrl || null,
-        useFloorPlan: data.useFloorPlan || false,
-      };
-    }
-  } catch { /* ignore */ }
-  return { seats: DEFAULT_SEATS, floorPlanUrl: null, useFloorPlan: false };
-}
+type View = 'room' | 'patients';
 
 export default function App() {
-  const savedState = loadSavedState();
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [seats, setSeats] = useState<Seat[]>(savedState.seats);
+  const [seats, setSeats] = useState<Seat[]>(DEFAULT_SEATS);
   const [consultations, setConsultations] = useState<Patient[]>([]);
-  const [floorPlanUrl, setFloorPlanUrl] = useState<string | null>(savedState.floorPlanUrl);
-  const [useFloorPlan, setUseFloorPlan] = useState(savedState.useFloorPlan);
-  const [showEditor, setShowEditor] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [view, setView] = useState<View>('room');
   const [, setTick] = useState(0);
-  const [, setSeatCounter] = useState(seats.length + 1);
-
-  // Save layout to localStorage
-  useEffect(() => {
-    const seatsToSave = seats.map(s => ({ ...s, patientId: null }));
-    localStorage.setItem('waitingRoom', JSON.stringify({
-      seats: seatsToSave,
-      floorPlanUrl,
-      useFloorPlan,
-    }));
-  }, [seats, floorPlanUrl, useFloorPlan]);
 
   useEffect(() => {
     fetchWorklistPatients().then(setPatients);
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const updates = await fetchPatientStatuses();
-      if (updates.length > 0) {
-        setPatients(prev => applyStatusUpdates(prev, updates));
-      }
-    }, STATUS_POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, []);
-
+  // Update waiting times every minute
   useEffect(() => {
     const interval = setInterval(() => setTick(t => t + 1), 60000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleDropPatient = useCallback((patientId: string, seatId: string) => {
-    setSeats(prev => {
-      const targetSeat = prev.find(s => s.id === seatId);
-      if (targetSeat?.patientId && targetSeat.patientId !== patientId) return prev;
+  const unassigned = patients.filter(p => p.seatId === null && p.status === 'checked_in');
 
-      const updated = prev.map(s =>
-        s.patientId === patientId ? { ...s, patientId: null } : s
-      );
-      return updated.map(s =>
-        s.id === seatId ? { ...s, patientId: patientId } : s
-      );
-    });
-
-    setPatients(prev =>
-      prev.map(p =>
-        p.id === patientId ? { ...p, seatId: seatId, status: 'waiting' as const } : p
-      )
-    );
+  const handleSelectPatient = useCallback((patientId: string) => {
+    setSelectedPatientId(prev => prev === patientId ? null : patientId);
+    setView('room');
   }, []);
+
+  const handleTapSeat = useCallback((seatId: string) => {
+    const seat = seats.find(s => s.id === seatId);
+    if (!seat) return;
+
+    // If a patient is selected and seat is empty, place them
+    if (selectedPatientId && !seat.patientId) {
+      setSeats(prev => prev.map(s =>
+        s.id === seatId ? { ...s, patientId: selectedPatientId } : s
+      ));
+      setPatients(prev => prev.map(p =>
+        p.id === selectedPatientId ? { ...p, seatId, status: 'waiting' as const } : p
+      ));
+      setSelectedPatientId(null);
+      return;
+    }
+
+    // If seat is occupied and no patient selected, select that patient
+    if (seat.patientId && !selectedPatientId) {
+      setSelectedPatientId(seat.patientId);
+      return;
+    }
+
+    // If a patient is selected and we tap an occupied seat, swap
+    if (selectedPatientId && seat.patientId) {
+      // Deselect
+      setSelectedPatientId(null);
+    }
+  }, [seats, selectedPatientId]);
+
+  const handleRemoveFromSeat = useCallback((seatId: string) => {
+    const seat = seats.find(s => s.id === seatId);
+    if (!seat?.patientId) return;
+    const pid = seat.patientId;
+
+    setSeats(prev => prev.map(s => s.id === seatId ? { ...s, patientId: null } : s));
+    setPatients(prev => prev.map(p =>
+      p.id === pid ? { ...p, seatId: null, status: 'checked_in' as const } : p
+    ));
+    setSelectedPatientId(null);
+  }, [seats]);
 
   const handleSendToConsultation = useCallback((patientId: string) => {
     const patient = patients.find(p => p.id === patientId);
     if (!patient) return;
 
-    setSeats(prev =>
-      prev.map(s => s.patientId === patientId ? { ...s, patientId: null } : s)
-    );
+    setSeats(prev => prev.map(s => s.patientId === patientId ? { ...s, patientId: null } : s));
     setPatients(prev => prev.filter(p => p.id !== patientId));
     setConsultations(prev => [...prev, { ...patient, status: 'in_consultation' }]);
     updatePatientStatus(patientId, 'in_consultation');
+    setSelectedPatientId(null);
   }, [patients]);
 
-  const handleRemovePatient = useCallback((seatId: string) => {
-    const seat = seats.find(s => s.id === seatId);
-    if (!seat?.patientId) return;
-    const patientId = seat.patientId;
-
-    setSeats(prev =>
-      prev.map(s => s.id === seatId ? { ...s, patientId: null } : s)
-    );
-    setPatients(prev =>
-      prev.map(p =>
-        p.id === patientId ? { ...p, seatId: null, status: 'checked_in' as const } : p
-      )
-    );
-  }, [seats]);
-
-  const handleAddSeat = useCallback((x: number, y: number) => {
-    setSeatCounter(prev => {
-      const num = prev;
-      const label = `L${num}`;
-      setSeats(s => [...s, {
-        id: label,
-        label,
-        row: y,  // In floor plan mode, row = y%, col = x%
-        col: x,
-        patientId: null,
-      }]);
-      return num + 1;
-    });
-  }, []);
-
-  const handleRemoveSeat = useCallback((seatId: string) => {
-    setSeats(prev => prev.filter(s => s.id !== seatId));
-  }, []);
-
-  const handleFloorPlanUpload = useCallback((url: string) => {
-    setFloorPlanUrl(url);
-    setUseFloorPlan(true);
-    // Reset to empty seats when a new floor plan is uploaded
-    setSeats([]);
-    setSeatCounter(1);
-  }, []);
-
+  const getPatientForSeat = (seat: Seat) => patients.find(p => p.id === seat.patientId);
   const occupiedCount = seats.filter(s => s.patientId !== null).length;
+
+  const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>Sala de Espera</h1>
-        <div className="stats">
-          <span className="stat">
-            <strong>{occupiedCount}</strong> / {seats.length} lugares ocupados
-          </span>
-          <span className="stat">
-            <strong>{patients.filter(p => p.seatId === null && p.status === 'checked_in').length}</strong> por alocar
-          </span>
-          <span className="stat">
-            <strong>{consultations.length}</strong> em consulta
-          </span>
-        </div>
-        <div className="header-actions">
-          <div className="legend">
-            <span className="legend-item"><span className="legend-dot" style={{ background: '#38a169' }}></span>&lt;15m</span>
-            <span className="legend-item"><span className="legend-dot" style={{ background: '#d69e2e' }}></span>15-29m</span>
-            <span className="legend-item"><span className="legend-dot" style={{ background: '#dd6b20' }}></span>30-44m</span>
-            <span className="legend-item"><span className="legend-dot" style={{ background: '#e53e3e' }}></span>45+m</span>
+      {/* Header */}
+      <header className="header">
+        <div className="header-top">
+          <h1>Sala de Espera</h1>
+          <div className="header-stats">
+            <span className="badge badge-blue">{occupiedCount}/{seats.length}</span>
+            <span className="badge badge-orange">{unassigned.length} espera</span>
+            {consultations.length > 0 && <span className="badge badge-green">{consultations.length} consulta</span>}
           </div>
-          <button className="btn-config" onClick={() => setShowEditor(true)}>
-            Configurar Planta
-          </button>
+        </div>
+        {/* Legend */}
+        <div className="legend">
+          <span><i className="dot dot-green"></i>&lt;15m</span>
+          <span><i className="dot dot-yellow"></i>15-29m</span>
+          <span><i className="dot dot-orange"></i>30-44m</span>
+          <span><i className="dot dot-red"></i>45+m</span>
         </div>
       </header>
 
-      <div className="app-content">
-        <aside className="sidebar">
-          <PatientList patients={patients} />
+      {/* Selection Banner */}
+      {selectedPatient && (
+        <div className="selection-banner">
+          <img src={selectedPatient.photoUrl} alt="" className="selection-photo" />
+          <span className="selection-name">{selectedPatient.name}</span>
+          <span className="selection-hint">
+            {selectedPatient.seatId ? 'Toque noutro lugar ou acao' : 'Toque num lugar livre'}
+          </span>
+          <button className="btn-cancel" onClick={() => setSelectedPatientId(null)}>Cancelar</button>
+        </div>
+      )}
 
-          {consultations.length > 0 && (
-            <div className="consultations">
-              <h2>Em Consulta</h2>
-              {consultations.map(p => (
-                <div key={p.id} className="consultation-item">
-                  <img src={p.photoUrl} alt={p.name} />
-                  <div>
-                    <span className="patient-name">{p.name}</span>
-                    <span className="patient-doctor">{p.doctor}</span>
-                  </div>
+      {/* Tab Navigation */}
+      <nav className="tabs">
+        <button className={`tab ${view === 'room' ? 'active' : ''}`} onClick={() => setView('room')}>
+          Sala ({occupiedCount}/{seats.length})
+        </button>
+        <button className={`tab ${view === 'patients' ? 'active' : ''}`} onClick={() => setView('patients')}>
+          Pacientes ({unassigned.length})
+        </button>
+      </nav>
+
+      {/* Room View */}
+      {view === 'room' && (
+        <div className="room-view">
+          <div className="seats-grid">
+            {seats.map(seat => {
+              const patient = getPatientForSeat(seat);
+              const isSelected = selectedPatientId && !patient && selectedPatientId !== null;
+              const isPatientSelected = patient && selectedPatientId === patient.id;
+              const waitLevel = patient ? getWaitingLevel(patient.checkedInAt) : 'ok';
+              const waitMins = patient ? getWaitingMinutes(patient.checkedInAt) : 0;
+
+              return (
+                <div
+                  key={seat.id}
+                  className={`seat ${patient ? 'occupied' : 'empty'} ${isSelected ? 'highlight' : ''} ${isPatientSelected ? 'selected' : ''}`}
+                  style={patient ? {
+                    borderColor: getWaitingBorderColor(waitLevel),
+                    background: getWaitingBgColor(waitLevel),
+                  } : {}}
+                  onClick={() => handleTapSeat(seat.id)}
+                >
+                  {patient ? (
+                    <div className="seat-content">
+                      <img src={patient.photoUrl} alt={patient.name} className="seat-photo" />
+                      <div className="seat-name">{patient.name.split(' ')[0]}</div>
+                      <div className="seat-wait" style={{ color: getWaitingColor(waitLevel) }}>
+                        {waitMins}m
+                      </div>
+                      {isPatientSelected && (
+                        <div className="seat-actions">
+                          <button className="btn-action btn-consult" onClick={(e) => { e.stopPropagation(); handleSendToConsultation(patient.id); }}>
+                            Consulta
+                          </button>
+                          <button className="btn-action btn-remove" onClick={(e) => { e.stopPropagation(); handleRemoveFromSeat(seat.id); }}>
+                            Remover
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="seat-empty-content">
+                      <div className="seat-number">{seat.label}</div>
+                      <div className="seat-free">Livre</div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              );
+            })}
+          </div>
+
+          {/* In Consultation */}
+          {consultations.length > 0 && (
+            <div className="section">
+              <h3 className="section-title">Em Consulta</h3>
+              <div className="consult-list">
+                {consultations.map(p => (
+                  <div key={p.id} className="consult-item">
+                    <img src={p.photoUrl} alt="" className="consult-photo" />
+                    <div className="consult-info">
+                      <span className="consult-name">{p.name}</span>
+                      <span className="consult-doctor">{p.doctor}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </aside>
+        </div>
+      )}
 
-        <main className="main-area">
-          <WaitingRoom
-            seats={seats}
-            patients={patients}
-            floorPlanUrl={floorPlanUrl}
-            useFloorPlan={useFloorPlan}
-            onDropPatient={handleDropPatient}
-            onSendToConsultation={handleSendToConsultation}
-            onRemovePatient={handleRemovePatient}
-          />
-        </main>
-      </div>
+      {/* Patients View */}
+      {view === 'patients' && (
+        <div className="patients-view">
+          {unassigned.length === 0 ? (
+            <div className="empty-msg">Todos os pacientes estao alocados</div>
+          ) : (
+            <div className="patients-list">
+              {unassigned.map(patient => {
+                const isSelected = selectedPatientId === patient.id;
+                const waitLevel = getWaitingLevel(patient.checkedInAt);
+                const waitMins = getWaitingMinutes(patient.checkedInAt);
 
-      {showEditor && (
-        <FloorPlanEditor
-          floorPlanUrl={floorPlanUrl}
-          seats={seats}
-          onFloorPlanUpload={handleFloorPlanUpload}
-          onAddSeat={handleAddSeat}
-          onRemoveSeat={handleRemoveSeat}
-          onClose={() => setShowEditor(false)}
-        />
+                return (
+                  <div
+                    key={patient.id}
+                    className={`patient-row ${isSelected ? 'selected' : ''}`}
+                    onClick={() => handleSelectPatient(patient.id)}
+                  >
+                    <img src={patient.photoUrl} alt="" className="patient-photo" />
+                    <div className="patient-details">
+                      <div className="patient-name">{patient.name}</div>
+                      <div className="patient-meta">
+                        {patient.appointmentTime} &middot; {patient.doctor}
+                      </div>
+                    </div>
+                    <div className="patient-wait" style={{ color: getWaitingColor(waitLevel), borderColor: getWaitingBorderColor(waitLevel) }}>
+                      {waitMins}m
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Seated patients */}
+          {patients.filter(p => p.seatId !== null).length > 0 && (
+            <div className="section">
+              <h3 className="section-title">Ja sentados</h3>
+              <div className="patients-list">
+                {patients.filter(p => p.seatId !== null).map(patient => {
+                  const seat = seats.find(s => s.patientId === patient.id);
+                  return (
+                    <div key={patient.id} className="patient-row seated" onClick={() => handleSelectPatient(patient.id)}>
+                      <img src={patient.photoUrl} alt="" className="patient-photo" />
+                      <div className="patient-details">
+                        <div className="patient-name">{patient.name}</div>
+                        <div className="patient-meta">{patient.doctor}</div>
+                      </div>
+                      <div className="patient-seat-badge">Lugar {seat?.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
