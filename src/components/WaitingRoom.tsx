@@ -4,14 +4,49 @@ import { Seat } from './Seat';
 interface WaitingRoomProps {
   seats: SeatType[];
   patients: Patient[];
+  floorPlanUrl: string | null;
+  useFloorPlan: boolean;
   onDropPatient: (patientId: string, seatId: string) => void;
   onSendToConsultation: (patientId: string) => void;
   onRemovePatient: (seatId: string) => void;
 }
 
-export function WaitingRoom({ seats, patients, onDropPatient, onSendToConsultation, onRemovePatient }: WaitingRoomProps) {
-  const maxRow = Math.max(...seats.map(s => s.row));
-  const maxCol = Math.max(...seats.map(s => s.col));
+export function WaitingRoom({ seats, patients, floorPlanUrl, useFloorPlan, onDropPatient, onSendToConsultation, onRemovePatient }: WaitingRoomProps) {
+  function getPatientForSeat(seat: SeatType): Patient | undefined {
+    if (!seat.patientId) return undefined;
+    return patients.find(p => p.id === seat.patientId);
+  }
+
+  // Floor plan mode: seats positioned absolutely over the image
+  if (useFloorPlan && floorPlanUrl) {
+    return (
+      <div className="waiting-room">
+        <h2>Sala de Espera</h2>
+        <div className="floor-plan-view">
+          <img src={floorPlanUrl} alt="Planta da clinica" className="floor-plan-image" draggable={false} />
+          {seats.map(seat => (
+            <div
+              key={seat.id}
+              className="floor-seat-wrapper"
+              style={{ left: `${seat.col}%`, top: `${seat.row}%` }}
+            >
+              <Seat
+                seat={seat}
+                patient={getPatientForSeat(seat)}
+                onDropPatient={onDropPatient}
+                onSendToConsultation={onSendToConsultation}
+                onRemovePatient={onRemovePatient}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Grid mode (default)
+  const maxRow = Math.max(...seats.map(s => s.row), 0);
+  const maxCol = Math.max(...seats.map(s => s.col), 0);
 
   const grid: (SeatType | null)[][] = [];
   for (let r = 0; r <= maxRow; r++) {
@@ -21,14 +56,9 @@ export function WaitingRoom({ seats, patients, onDropPatient, onSendToConsultati
     }
   }
 
-  function getPatientForSeat(seat: SeatType): Patient | undefined {
-    if (!seat.patientId) return undefined;
-    return patients.find(p => p.id === seat.patientId);
-  }
-
   return (
     <div className="waiting-room">
-      <h2>🏥 Sala de Espera</h2>
+      <h2>Sala de Espera</h2>
       <div className="room-layout">
         {grid.map((row, rowIdx) => (
           <div key={rowIdx} className="seat-row">
