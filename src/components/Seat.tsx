@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Seat as SeatType, Patient } from '../types';
 import { PatientCard } from './PatientCard';
 import { getWaitingLevel, getWaitingMinutes, getWaitingBgColor, getWaitingBorderColor, getWaitingColor } from '../utils/waitingTime';
@@ -13,6 +13,22 @@ interface SeatProps {
 
 export function Seat({ seat, patient, onDropPatient, onSendToConsultation, onRemovePatient }: SeatProps) {
   const [isOver, setIsOver] = useState(false);
+  const seatRef = useRef<HTMLDivElement>(null);
+
+  // Listen for touch drop events
+  const handleTouchDrop = useCallback((e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail?.patientId) {
+      onDropPatient(detail.patientId, seat.id);
+    }
+  }, [onDropPatient, seat.id]);
+
+  useEffect(() => {
+    const el = seatRef.current;
+    if (!el) return;
+    el.addEventListener('touchdrop', handleTouchDrop);
+    return () => el.removeEventListener('touchdrop', handleTouchDrop);
+  }, [handleTouchDrop]);
 
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
@@ -44,8 +60,10 @@ export function Seat({ seat, patient, onDropPatient, onSendToConsultation, onRem
 
   return (
     <div
+      ref={seatRef}
       className={`seat ${isOccupied ? 'occupied' : 'empty'} ${isOver ? 'drag-over' : ''}`}
       style={seatStyle}
+      data-seat-id={seat.id}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

@@ -188,6 +188,19 @@
   background: #ebf8ff;
 }
 
+/* Touch drag support */
+.drag-ghost {
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.seat.touch-over {
+  border-color: #38a169 !important;
+  background: #f0fff4 !important;
+  box-shadow: 0 0 0 3px rgba(56, 161, 105, 0.3);
+  transform: scale(1.03);
+}
+
 /* Waiting Room */
 .waiting-room {
   max-width: 800px;

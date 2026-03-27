@@ -1,4 +1,5 @@
 import type { Patient } from '../types';
+import { useTouchDrag } from '../hooks/useTouchDrag';
 
 interface PatientCardProps {
   patient: Patient;
@@ -7,6 +8,8 @@ interface PatientCardProps {
 }
 
 export function PatientCard({ patient, onSendToConsultation, isInSeat }: PatientCardProps) {
+  const { onTouchStart, onTouchMove, onTouchEnd } = useTouchDrag(patient.id);
+
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData('patientId', patient.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -25,6 +28,9 @@ export function PatientCard({ patient, onSendToConsultation, isInSeat }: Patient
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
     >
       <img
         src={patient.photoUrl}
@@ -43,7 +49,7 @@ export function PatientCard({ patient, onSendToConsultation, isInSeat }: Patient
           onClick={() => onSendToConsultation(patient.id)}
           title="Enviar para consulta"
         >
-          🏥
+          Consulta
         </button>
       )}
     </div>
